@@ -11,6 +11,8 @@
 #define MAX_LARGO_LECTURA 1024
 #define MAX_CAMPOS 9
 #define MAX_OBJETOS 4
+#define MAX_INVENTARIO 10
+#define TIEMPO_INICIAL 30
 #define ARCHIVO_CSV "graphquest.csv"
 
 // Enumeración para direcciones
@@ -22,13 +24,23 @@ enum Direcciones {
     DERECHA = 4
 };
 
-// Estructuras
+// Definición de estructuras en el orden correcto
+
+// Primero la estructura Objeto (base para las demás)
 typedef struct {
     char nombre[MAX_LARGO_NOMBRE];
     int peso;
     int valor;
 } Objeto;
 
+// Luego Inventario que usa Objeto
+typedef struct {
+    Objeto objetos[MAX_INVENTARIO];
+    int cantidad;
+    int tiempo_restante;
+} Inventario;
+
+// Finalmente Escenario que también usa Objeto
 typedef struct {
     int id;
     char nombre[MAX_LARGO_NOMBRE];
@@ -49,9 +61,10 @@ Escenario* buscar_escenario_por_id(Escenario* escenarios, int num_escenarios, in
 void mostrar_escenario_actual(const Escenario* escena);
 void limpiar_buffer_entrada();
 void liberar_escenarios(Escenario* escenarios);
-void mostrar_menu_direcciones(const Escenario* escena);
 int parse_csv_line(char* line, char** fields, int max_fields);
 void eliminar_comillas(char* str);
+void mostrar_inventario(const Inventario* inv);
+int recoger_objetos(Escenario* escena, Inventario* inv);
 
 // Implementación de funciones
 
@@ -256,17 +269,8 @@ void mostrar_escenario_actual(const Escenario* escena) {
         printf("No hay objetos en este escenario.\n");
     }
 
-    mostrar_menu_direcciones(escena);
 }
 
-void mostrar_menu_direcciones(const Escenario* escena) {
-    printf("\nDirecciones disponibles:\n");
-    if (escena->arriba != 0) printf("%d. Arriba\n", ARRIBA);
-    if (escena->abajo != 0) printf("%d. Abajo\n", ABAJO);
-    if (escena->izquierda != 0) printf("%d. Izquierda\n", IZQUIERDA);
-    if (escena->derecha != 0) printf("%d. Derecha\n", DERECHA);
-    printf("%d. Salir\n", SALIR);
-}
 
 void limpiar_buffer_entrada() {
     int c;
@@ -279,11 +283,77 @@ void liberar_escenarios(Escenario* escenarios) {
     }
 }
 
+void mostrar_inventario(const Inventario* inv) {
+    printf("\n=== INVENTARIO (Tiempo: %d) ===\n", inv->tiempo_restante);
+    if (inv->cantidad == 0) {
+        printf("Vacío\n");
+        return;
+    }
+    
+    for (int i = 0; i < inv->cantidad; i++) {
+        printf("- %s (Valor: %d, Peso: %d)\n",
+               inv->objetos[i].nombre,
+               inv->objetos[i].valor,
+               inv->objetos[i].peso);
+    }
+}
+
+int recoger_objetos(Escenario* escena, Inventario* inv) {
+    if (inv->cantidad >= MAX_INVENTARIO) {
+        printf("¡Inventario lleno! No puedes llevar más objetos.\n");
+        return 0;
+    }
+
+    printf("\nObjetos disponibles para recoger:\n");
+    int disponibles = 0;
+    int indices[MAX_OBJETOS] = {0};
+    
+    for (int i = 0; i < MAX_OBJETOS; i++) {
+        if (escena->objetos[i].nombre[0] != '\0') {
+            printf("%d. %s (Valor: %d, Peso: %d)\n",
+                   i+1,
+                   escena->objetos[i].nombre,
+                   escena->objetos[i].valor,
+                   escena->objetos[i].peso);
+            indices[disponibles++] = i;
+        }
+    }
+
+    if (disponibles == 0) {
+        printf("No hay objetos para recoger aquí.\n");
+        return 0;
+    }
+
+    printf("Elige el número del objeto a recoger (0 para cancelar): ");
+    int eleccion;
+    if (scanf("%d", &eleccion) != 1 || eleccion < 0 || eleccion > disponibles) {
+        printf("Selección inválida.\n");
+        limpiar_buffer_entrada();
+        return 0;
+    }
+
+    if (eleccion == 0) {
+        return 0;
+    }
+
+    int indice_real = indices[eleccion-1];
+    inv->objetos[inv->cantidad] = escena->objetos[indice_real];
+    inv->cantidad++;
+    printf("¡Has recogido: %s!\n", escena->objetos[indice_real].nombre);
+    
+    // Eliminar el objeto del escenario
+    escena->objetos[indice_real].nombre[0] = '\0';
+    
+    return 1; // Se descuenta 1 de tiempo
+}
+
 int main(void) {
     setlocale(LC_ALL, "");
 
     Escenario* escenarios = NULL;
     int num_escenarios = 0;
+    Inventario inventario = {0};
+    inventario.tiempo_restante = TIEMPO_INICIAL;
 
     printf("Cargando escenarios desde: %s\n", ARCHIVO_CSV);
 
@@ -300,8 +370,17 @@ int main(void) {
     }
 
     bool ejecutando = true;
-    while (ejecutando) {
+    while (ejecutando && inventario.tiempo_restante > 0) {
+        printf("\n=== Tiempo restante: %d ===\n", inventario.tiempo_restante);
         mostrar_escenario_actual(escenario_actual);
+
+        printf("\nOpciones:\n");
+        printf("1-4. Moverse (Arriba/Abajo/Izquierda/Derecha)\n");
+        printf("5. Examinar objetos del escenario\n");
+        printf("6. Recoger objetos\n");
+        printf("7. Ver inventario\n");  // Nueva opción para ver inventario
+        printf("8. Usar objeto del inventario\n");
+        printf("0. Salir\n");
 
         int opcion;
         printf("\nElige una opción: ");
@@ -312,35 +391,116 @@ int main(void) {
         }
         limpiar_buffer_entrada();
 
-        int destino_id = 0;
+
         switch (opcion) {
-            case ARRIBA:    destino_id = escenario_actual->arriba; break;
-            case ABAJO:      destino_id = escenario_actual->abajo; break;
-            case IZQUIERDA: destino_id = escenario_actual->izquierda; break;
-            case DERECHA:   destino_id = escenario_actual->derecha; break;
-            case SALIR:      ejecutando = false; break;
-            default:        printf("Opción no válida\n"); continue;
-        }
-
-        if (opcion != SALIR && destino_id == 0) {
-            printf("No puedes ir en esa dirección\n");
-            continue;
-        }
-
-        if (opcion != SALIR) {
-            Escenario* nuevo = buscar_escenario_por_id(escenarios, num_escenarios, destino_id);
-            if (nuevo == NULL) {
-                printf("Error: Escenario destino no encontrado\n");
-            } else {
-                escenario_actual = nuevo;
-                if (escenario_actual->es_final) {
-                    printf("\n=== FIN DEL JUEGO ===\n");
-                    printf("¡Felicidades! Has llegado a: %s\n", escenario_actual->nombre);
-                    ejecutando = false;
+            case 1: // Arriba
+            case 2: // Abajo
+            case 3: // Izquierda
+            case 4: { // Derecha
+                int destino_id = 0;
+                switch (opcion) {
+                    case 1: destino_id = escenario_actual->arriba; break;
+                    case 2: destino_id = escenario_actual->abajo; break;
+                    case 3: destino_id = escenario_actual->izquierda; break;
+                    case 4: destino_id = escenario_actual->derecha; break;
                 }
+
+                if (destino_id == 0) {
+                    printf("No puedes ir en esa dirección\n");
+                } else {
+                    Escenario* nuevo = buscar_escenario_por_id(escenarios, num_escenarios, destino_id);
+                    if (nuevo == NULL) {
+                        printf("Error: Escenario destino no encontrado\n");
+                    } else {
+                        escenario_actual = nuevo;
+                        inventario.tiempo_restante--; // Movimiento consume tiempo
+                        if (escenario_actual->es_final) {
+                            printf("\n=== FIN DEL JUEGO ===\n");
+                            printf("¡Felicidades! Has llegado a: %s\n", escenario_actual->nombre);
+                            ejecutando = false;
+                        }
+                    }
+                }
+                break;
             }
+
+            case 5: { // Examinar objetos
+                printf("\nObjetos en este escenario:\n");
+                bool hay_objetos = false;
+                for (int i = 0; i < MAX_OBJETOS; i++) {
+                    if (escenario_actual->objetos[i].nombre[0] != '\0') {
+                        printf("- %s (Valor: %d, Peso: %d)\n",
+                               escenario_actual->objetos[i].nombre,
+                               escenario_actual->objetos[i].valor,
+                               escenario_actual->objetos[i].peso);
+                        hay_objetos = true;
+                    }
+                }
+                if (!hay_objetos) {
+                    printf("No hay objetos en este escenario.\n");
+                }
+                break;
+            }
+
+            case 6: { // Recoger objetos
+                inventario.tiempo_restante -= recoger_objetos(escenario_actual, &inventario);
+                break;
+            }
+
+            case 7: { // Ver inventario (nueva opción)
+                mostrar_inventario(&inventario);
+                break;
+            }
+
+            case 8: { // Usar objeto (antes era 7)
+                if (inventario.cantidad == 0) {
+                    printf("No tienes objetos en tu inventario.\n");
+                    break;
+                }
+
+                printf("\nObjetos en tu inventario:\n");
+                for (int i = 0; i < inventario.cantidad; i++) {
+                    printf("%d. %s\n", i+1, inventario.objetos[i].nombre);
+                }
+
+                printf("Elige el objeto a usar (0 para cancelar): ");
+                int eleccion;
+                if (scanf("%d", &eleccion) != 1 || eleccion < 0 || eleccion > inventario.cantidad) {
+                    printf("Selección inválida.\n");
+                    limpiar_buffer_entrada();
+                    break;
+                }
+
+                if (eleccion > 0) {
+                    printf("Has usado: %s\n", inventario.objetos[eleccion-1].nombre);
+                    inventario.tiempo_restante--; // Usar objeto consume tiempo
+                }
+                break;
+            }
+
+            case 0: // Salir
+                ejecutando = false;
+                break;
+
+            default:
+                printf("Opción no válida\n");
+                break;
         }
     }
+    if (inventario.tiempo_restante <= 0) {
+        printf("\n¡Se te acabó el tiempo! Game Over.\n");
+    }
+
+    // Mostrar resumen final
+    printf("\n=== RESULTADO FINAL ===\n");
+    printf("Escenario final: %s\n", escenario_actual->nombre);
+    printf("Objetos recolectados: %d/%d\n", inventario.cantidad, MAX_INVENTARIO);
+    
+    int valor_total = 0;
+    for (int i = 0; i < inventario.cantidad; i++) {
+        valor_total += inventario.objetos[i].valor;
+    }
+    printf("Valor total de tu inventario: %d\n", valor_total);
 
     liberar_escenarios(escenarios);
     return EXIT_SUCCESS;
