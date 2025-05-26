@@ -14,6 +14,7 @@
 #define MAX_INVENTARIO 10
 #define TIEMPO_INICIAL 30
 #define ARCHIVO_CSV "graphquest.csv"
+#define OPCION_REINICIAR 9
 
 // Enumeración para direcciones
 enum Direcciones {
@@ -380,6 +381,18 @@ void descartar_objeto(Inventario* inv) {
     }
 }
 
+void reiniciar_partida(Escenario** escenarios, int num_escenarios, Escenario** escenario_actual, Inventario* inv) {
+    // Reiniciar inventario
+    inv->cantidad = 0;
+    inv->tiempo_restante = TIEMPO_INICIAL;
+    
+    // Buscar escenario inicial (ID 1)
+    *escenario_actual = buscar_escenario_por_id(*escenarios, num_escenarios, 1);
+    
+    printf("\n¡Partida reiniciada!\n");
+    printf("Inventario vaciado y tiempo restablecido a %d.\n", TIEMPO_INICIAL);
+}
+
 int main(void) {
     setlocale(LC_ALL, "");
 
@@ -412,8 +425,8 @@ int main(void) {
         printf("5. Examinar objetos del escenario\n");
         printf("6. Recoger objetos\n");
         printf("7. Ver inventario\n");
-        printf("8. Descartar objeto\n");  // Nueva opción
-        printf("9. Usar objeto\n");
+        printf("8. Descartar objeto\n");
+        printf("9. Reiniciar partida\n", OPCION_REINICIAR);
         printf("0. Salir\n");
 
         int opcion;
@@ -507,34 +520,12 @@ int main(void) {
             case 8: { // Descartar objeto
                 descartar_objeto(&inventario);
                 break;
-}
 
-            case 9: { // Usar objeto (antes era 7)
-                if (inventario.cantidad == 0) {
-                    printf("No tienes objetos en tu inventario.\n");
-                    break;
-                }
-
-                printf("\nObjetos en tu inventario:\n");
-                for (int i = 0; i < inventario.cantidad; i++) {
-                    printf("%d. %s\n", i+1, inventario.objetos[i].nombre);
-                }
-
-                printf("Elige el objeto a usar (0 para cancelar): ");
-                int eleccion;
-                if (scanf("%d", &eleccion) != 1 || eleccion < 0 || eleccion > inventario.cantidad) {
-                    printf("Selección inválida.\n");
-                    limpiar_buffer_entrada();
-                    break;
-                }
-
-                if (eleccion > 0) {
-                    printf("Has usado: %s\n", inventario.objetos[eleccion-1].nombre);
-                    inventario.tiempo_restante--; // Usar objeto consume tiempo
-                }
+            case 9: { 
+                reiniciar_partida(&escenarios, num_escenarios, &escenario_actual, &inventario);
                 break;
-            }
-
+            }   
+}
             case 0: // Salir
                 ejecutando = false;
                 break;
