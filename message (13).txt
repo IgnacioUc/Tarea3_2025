@@ -1,0 +1,347 @@
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <locale.h>
+
+// Constantes
+#define MAX_LARGO_NOMBRE 40
+#define MAX_LARGO_DESCRIPCION 200
+#define MAX_LARGO_LECTURA 1024
+#define MAX_CAMPOS 9
+#define MAX_OBJETOS 4
+#define ARCHIVO_CSV "graphquest.csv"
+
+// Enumeración para direcciones
+enum Direcciones {
+    SALIR = 0,
+    ARRIBA = 1,
+    ABAJO = 2,
+    IZQUIERDA = 3,
+    DERECHA = 4
+};
+
+// Estructuras
+typedef struct {
+    char nombre[MAX_LARGO_NOMBRE];
+    int peso;
+    int valor;
+} Objeto;
+
+typedef struct {
+    int id;
+    char nombre[MAX_LARGO_NOMBRE];
+    char descripcion[MAX_LARGO_DESCRIPCION];
+    int arriba;
+    int abajo;
+    int izquierda;
+    int derecha;
+    Objeto objetos[MAX_OBJETOS];
+    bool es_final;
+} Escenario;
+
+// Prototipos de funciones
+bool parsear_booleano(const char* str);
+void parsear_objetos(const char* str, Escenario* escena);
+int cargar_escenarios(const char* archivo_csv, Escenario** escenarios, int* num_escenarios);
+Escenario* buscar_escenario_por_id(Escenario* escenarios, int num_escenarios, int id);
+void mostrar_escenario_actual(const Escenario* escena);
+void limpiar_buffer_entrada();
+void liberar_escenarios(Escenario* escenarios);
+void mostrar_menu_direcciones(const Escenario* escena);
+int parse_csv_line(char* line, char** fields, int max_fields);
+void eliminar_comillas(char* str);
+
+// Implementación de funciones
+
+void eliminar_comillas(char* str) {
+    if (str == NULL || str[0] == '\0') return;
+
+    size_t len = strlen(str);
+    if (str[0] == '"' && str[len-1] == '"') {
+        memmove(str, str+1, len-2);
+        str[len-2] = '\0';
+    }
+}
+
+bool parsear_booleano(const char* str) {
+    if (str == NULL || str[0] == '\0') return false;
+    return (tolower(str[0]) == 't' || str[0] == '1' || tolower(str[0]) == 's' ||
+           strcasecmp(str, "si") == 0 || strcasecmp(str, "yes") == 0);
+}
+
+void parsear_objetos(const char* str, Escenario* escena) {
+    if (str == NULL || str[0] == '\0') return;
+
+    char copia[MAX_LARGO_LECTURA];
+    strncpy(copia, str, MAX_LARGO_LECTURA);
+    copia[MAX_LARGO_LECTURA - 1] = '\0';
+    eliminar_comillas(copia);
+
+    char* token = strtok(copia, ";");
+    int i = 0;
+
+    while (token != NULL && i < MAX_OBJETOS) {
+        while (*token == ' ') token++;
+
+        char nombre[MAX_LARGO_NOMBRE] = {0};
+        int valor = 0, peso = 0;
+
+        if (sscanf(token, "%[^,],%d,%d", nombre, &valor, &peso) == 3) {
+            size_t len = strlen(nombre);
+            while (len > 0 && isspace(nombre[len - 1])) {
+                nombre[--len] = '\0';
+            }
+
+            strncpy(escena->objetos[i].nombre, nombre, MAX_LARGO_NOMBRE - 1);
+            escena->objetos[i].valor = valor;
+            escena->objetos[i].peso = peso;
+            i++;
+        }
+        token = strtok(NULL, ";");
+    }
+}
+
+int parse_csv_line(char* line, char** fields, int max_fields) {
+    int field_count = 0;
+    char* start = line;
+    int in_quotes = 0;
+
+    for (char* p = line; *p && field_count < max_fields; p++) {
+        if (*p == '"' && (p == line || *(p-1) != '\\')) {
+            in_quotes = !in_quotes;
+        } else if (*p == ',' && !in_quotes) {
+            *p = '\0';
+            fields[field_count++] = start;
+            start = p + 1;
+        }
+    }
+
+    if (field_count < max_fields) {
+        fields[field_count++] = start;
+    }
+
+    return field_count;
+}
+
+int cargar_escenarios(const char* archivo_csv, Escenario** escenarios, int* num_escenarios) {
+    FILE* archivo = fopen(archivo_csv, "r");
+    if (archivo == NULL) {
+        fprintf(stderr, "Error: No se pudo abrir el archivo %s\n", archivo_csv);
+        perror("Detalle");
+        return -1;
+    }
+
+    char linea[MAX_LARGO_LECTURA];
+    *num_escenarios = 0;
+
+    // Saltar la línea de encabezado
+    if (fgets(linea, MAX_LARGO_LECTURA, archivo) == NULL) {
+        fclose(archivo);
+        fprintf(stderr, "Error: Archivo vacío o sin encabezado\n");
+        return -1;
+    }
+
+    // Primera pasada: contar líneas válidas
+    while (fgets(linea, MAX_LARGO_LECTURA, archivo) != NULL) {
+        char* fields[MAX_CAMPOS] = {0};
+        if (parse_csv_line(linea, fields, MAX_CAMPOS) >= MAX_CAMPOS) {
+            (*num_escenarios)++;
+        }
+    }
+
+    if (*num_escenarios <= 0) {
+        fclose(archivo);
+        fprintf(stderr, "Error: El archivo no contiene líneas válidas con %d campos\n", MAX_CAMPOS);
+        return -1;
+    }
+
+    *escenarios = (Escenario*)calloc(*num_escenarios, sizeof(Escenario));
+    if (*escenarios == NULL) {
+        fclose(archivo);
+        perror("Error al asignar memoria para escenarios");
+        return -1;
+    }
+
+    rewind(archivo);
+    fgets(linea, MAX_LARGO_LECTURA, archivo); // Saltar encabezado nuevamente
+
+    int indice_escenario = 0;
+    bool tiene_id_1 = false;
+
+    while (fgets(linea, MAX_LARGO_LECTURA, archivo) != NULL && indice_escenario < *num_escenarios) {
+        linea[strcspn(linea, "\n")] = '\0';
+
+        char* fields[MAX_CAMPOS] = {0};
+        int num_fields = parse_csv_line(linea, fields, MAX_CAMPOS);
+
+        if (num_fields >= MAX_CAMPOS) {
+            (*escenarios)[indice_escenario].id = atoi(fields[0]);
+            if ((*escenarios)[indice_escenario].id == 1) tiene_id_1 = true;
+
+            // Procesar nombre
+            strncpy((*escenarios)[indice_escenario].nombre, fields[1], MAX_LARGO_NOMBRE - 1);
+            eliminar_comillas((*escenarios)[indice_escenario].nombre);
+
+            // Procesar descripción
+            strncpy((*escenarios)[indice_escenario].descripcion, fields[2], MAX_LARGO_DESCRIPCION - 1);
+            eliminar_comillas((*escenarios)[indice_escenario].descripcion);
+
+            // Inicializar objetos
+            for (int k = 0; k < MAX_OBJETOS; k++) {
+                (*escenarios)[indice_escenario].objetos[k].nombre[0] = '\0';
+                (*escenarios)[indice_escenario].objetos[k].peso = 0;
+                (*escenarios)[indice_escenario].objetos[k].valor = 0;
+            }
+
+            // Procesar objetos
+            parsear_objetos(fields[3], &(*escenarios)[indice_escenario]);
+
+            // Procesar direcciones
+            (*escenarios)[indice_escenario].arriba = atoi(fields[4]);
+            (*escenarios)[indice_escenario].abajo = atoi(fields[5]);
+            (*escenarios)[indice_escenario].izquierda = atoi(fields[6]);
+            (*escenarios)[indice_escenario].derecha = atoi(fields[7]);
+
+            // Procesar es_final
+            (*escenarios)[indice_escenario].es_final = parsear_booleano(fields[8]);
+
+            // Asegurar terminación nula
+            (*escenarios)[indice_escenario].nombre[MAX_LARGO_NOMBRE - 1] = '\0';
+            (*escenarios)[indice_escenario].descripcion[MAX_LARGO_DESCRIPCION - 1] = '\0';
+
+            indice_escenario++;
+        }
+    }
+
+    fclose(archivo);
+
+    if (!tiene_id_1) {
+        fprintf(stderr, "Error: No se encontró un escenario con ID 1 en el archivo\n");
+        free(*escenarios);
+        *escenarios = NULL;
+        return -1;
+    }
+
+    return 0;
+}
+
+Escenario* buscar_escenario_por_id(Escenario* escenarios, int num_escenarios, int id) {
+    for (int i = 0; i < num_escenarios; i++) {
+        if (escenarios[i].id == id) {
+            return &escenarios[i];
+        }
+    }
+    return NULL;
+}
+
+void mostrar_escenario_actual(const Escenario* escena) {
+    printf("\n=== %s ===\n", escena->nombre);
+    printf("%s\n", escena->descripcion);
+
+    // Mostrar objetos disponibles
+    printf("\nObjetos disponibles:\n");
+    bool hay_objetos = false;
+    for (int i = 0; i < MAX_OBJETOS; i++) {
+        if (escena->objetos[i].nombre[0] != '\0') {
+            printf("- %s (Valor: %d, Peso: %d)\n",
+                   escena->objetos[i].nombre,
+                   escena->objetos[i].valor,
+                   escena->objetos[i].peso);
+            hay_objetos = true;
+        }
+    }
+    if (!hay_objetos) {
+        printf("No hay objetos en este escenario.\n");
+    }
+
+    mostrar_menu_direcciones(escena);
+}
+
+void mostrar_menu_direcciones(const Escenario* escena) {
+    printf("\nDirecciones disponibles:\n");
+    if (escena->arriba != 0) printf("%d. Arriba\n", ARRIBA);
+    if (escena->abajo != 0) printf("%d. Abajo\n", ABAJO);
+    if (escena->izquierda != 0) printf("%d. Izquierda\n", IZQUIERDA);
+    if (escena->derecha != 0) printf("%d. Derecha\n", DERECHA);
+    printf("%d. Salir\n", SALIR);
+}
+
+void limpiar_buffer_entrada() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
+
+void liberar_escenarios(Escenario* escenarios) {
+    if (escenarios != NULL) {
+        free(escenarios);
+    }
+}
+
+int main(void) {
+    setlocale(LC_ALL, "");
+
+    Escenario* escenarios = NULL;
+    int num_escenarios = 0;
+
+    printf("Cargando escenarios desde: %s\n", ARCHIVO_CSV);
+
+    if (cargar_escenarios(ARCHIVO_CSV, &escenarios, &num_escenarios) != 0) {
+        fprintf(stderr, "Error al cargar escenarios. Verifique el archivo CSV.\n");
+        return EXIT_FAILURE;
+    }
+
+    Escenario* escenario_actual = buscar_escenario_por_id(escenarios, num_escenarios, 1);
+    if (escenario_actual == NULL) {
+        fprintf(stderr, "Error crítico: Escenario inicial no encontrado después de carga exitosa\n");
+        liberar_escenarios(escenarios);
+        return EXIT_FAILURE;
+    }
+
+    bool ejecutando = true;
+    while (ejecutando) {
+        mostrar_escenario_actual(escenario_actual);
+
+        int opcion;
+        printf("\nElige una opción: ");
+        if (scanf("%d", &opcion) != 1) {
+            printf("Entrada inválida. Por favor ingrese un número.\n");
+            limpiar_buffer_entrada();
+            continue;
+        }
+        limpiar_buffer_entrada();
+
+        int destino_id = 0;
+        switch (opcion) {
+            case ARRIBA:    destino_id = escenario_actual->arriba; break;
+            case ABAJO:      destino_id = escenario_actual->abajo; break;
+            case IZQUIERDA: destino_id = escenario_actual->izquierda; break;
+            case DERECHA:   destino_id = escenario_actual->derecha; break;
+            case SALIR:      ejecutando = false; break;
+            default:        printf("Opción no válida\n"); continue;
+        }
+
+        if (opcion != SALIR && destino_id == 0) {
+            printf("No puedes ir en esa dirección\n");
+            continue;
+        }
+
+        if (opcion != SALIR) {
+            Escenario* nuevo = buscar_escenario_por_id(escenarios, num_escenarios, destino_id);
+            if (nuevo == NULL) {
+                printf("Error: Escenario destino no encontrado\n");
+            } else {
+                escenario_actual = nuevo;
+                if (escenario_actual->es_final) {
+                    printf("\n=== FIN DEL JUEGO ===\n");
+                    printf("¡Felicidades! Has llegado a: %s\n", escenario_actual->nombre);
+                    ejecutando = false;
+                }
+            }
+        }
+    }
+
+    liberar_escenarios(escenarios);
+    return EXIT_SUCCESS;
+}
