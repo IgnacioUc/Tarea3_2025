@@ -65,6 +65,7 @@ int parse_csv_line(char* line, char** fields, int max_fields);
 void eliminar_comillas(char* str);
 void mostrar_inventario(const Inventario* inv);
 int recoger_objetos(Escenario* escena, Inventario* inv);
+void descartar_objeto(Inventario* inv);
 
 // Implementación de funciones
 
@@ -347,6 +348,38 @@ int recoger_objetos(Escenario* escena, Inventario* inv) {
     return 1; // Se descuenta 1 de tiempo
 }
 
+void descartar_objeto(Inventario* inv) {
+    if (inv->cantidad == 0) {
+        printf("No tienes objetos para descartar.\n");
+        return;
+    }
+
+    printf("\nObjetos en tu inventario:\n");
+    for (int i = 0; i < inv->cantidad; i++) {
+        printf("%d. %s (Peso: %d)\n", i+1, 
+               inv->objetos[i].nombre, 
+               inv->objetos[i].peso);
+    }
+
+    printf("Elige el objeto a descartar (0 para cancelar): ");
+    int eleccion;
+    if (scanf("%d", &eleccion) != 1 || eleccion < 0 || eleccion > inv->cantidad) {
+        printf("Selección inválida.\n");
+        limpiar_buffer_entrada();
+        return;
+    }
+
+    if (eleccion > 0) {
+        printf("Has descartado: %s\n", inv->objetos[eleccion-1].nombre);
+        // Mover los objetos posteriores una posición hacia adelante
+        for (int i = eleccion-1; i < inv->cantidad-1; i++) {
+            inv->objetos[i] = inv->objetos[i+1];
+        }
+        inv->cantidad--;
+        inv->tiempo_restante--; // Descartar consume tiempo
+    }
+}
+
 int main(void) {
     setlocale(LC_ALL, "");
 
@@ -378,8 +411,9 @@ int main(void) {
         printf("1-4. Moverse (Arriba/Abajo/Izquierda/Derecha)\n");
         printf("5. Examinar objetos del escenario\n");
         printf("6. Recoger objetos\n");
-        printf("7. Ver inventario\n");  // Nueva opción para ver inventario
-        printf("8. Usar objeto del inventario\n");
+        printf("7. Ver inventario\n");
+        printf("8. Descartar objeto\n");  // Nueva opción
+        printf("9. Usar objeto\n");
         printf("0. Salir\n");
 
         int opcion;
@@ -447,12 +481,35 @@ int main(void) {
                 break;
             }
 
-            case 7: { // Ver inventario (nueva opción)
-                mostrar_inventario(&inventario);
+            case 7: { // Ver inventario
+                printf("\n=== TU INVENTARIO ===\n");
+                if (inventario.cantidad == 0) {
+                    printf("No tienes objetos en tu inventario.\n");
+                } else {
+                    printf("Objetos recolectados (%d/%d):\n", inventario.cantidad, MAX_INVENTARIO);
+                    for (int i = 0; i < inventario.cantidad; i++) {
+                        printf("- %s (Valor: %d, Peso: %d)\n", 
+                            inventario.objetos[i].nombre,
+                            inventario.objetos[i].valor,
+                            inventario.objetos[i].peso);
+                    }
+                    
+                    // Calcular valor total
+                    int valor_total = 0;
+                    for (int i = 0; i < inventario.cantidad; i++) {
+                        valor_total += inventario.objetos[i].valor;
+                    }
+                    printf("\nValor total: %d\n", valor_total);
+                }
                 break;
             }
 
-            case 8: { // Usar objeto (antes era 7)
+            case 8: { // Descartar objeto
+                descartar_objeto(&inventario);
+                break;
+}
+
+            case 9: { // Usar objeto (antes era 7)
                 if (inventario.cantidad == 0) {
                     printf("No tienes objetos en tu inventario.\n");
                     break;
